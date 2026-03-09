@@ -1,0 +1,7 @@
+{
+  "name": "Nicho's Quality Wears",
+  "description": "Affordable and high-quality shoes, shirts, sneakers, and bags based in Takoradi, Ghana.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required) - Firebase Auth UID
+    //   - email: string (required, email format) - Customer email
+    //   - displayName: string (optional) - Customer name
+    //   - photoURL: string (optional) - Profile picture URL
+    //   - role: string (required, enum: ['admin', 'customer']) - User role
+    //   - createdAt: timestamp (required) - Account creation time
+    //
+    // Collection: interests
+    // Document ID: {interestId}
+    // Fields:
+    //   - customerUid: string (required) - UID of the customer
+    //   - customerEmail: string (required, email format) - Email of the customer
+    //   - itemType: string (required) - The type of item the customer wants
+    //   - productId: string (optional) - Specific product ID
+    //   - productName: string (optional) - Name of the product
+    //   - status: string (required, enum: ['pending', 'contacted', 'completed']) - Status
+    //   - createdAt: timestamp (required) - Time of submission
+    //
+    // Collection: chats/{chatId}/messages
+    // Document ID: {messageId}
+    // Fields:
+    //   - senderUid: string (required) - UID of the sender
+    //   - receiverUid: string (required) - UID of the receiver
+    //   - text: string (required) - Message content
+    //   - createdAt: timestamp (required) - Time of message
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "albertbenjaminasare@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && 
+                      request.resource.data.role == 'customer' &&
+                      isValidEmail(request.resource.data.email) &&
+                      request.resource.data.uid == userId;
+      allow update: if isAdmin() || (isOwner(userId) && 
+                      request.resource.data.role == resource.data.role &&
+                      request.resource.data.uid == resource.data.uid);
+    }
+
+    // Order interests
+    match /interests/{interestId} {
+      allow read: if isAuthenticated() && (resource.data.customerUid == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && 
+                      request.resource.data.customerUid == request.auth.uid &&
+                      isValidEmail(request.resource.data.customerEmail) &&
+                      request.resource.data.status == 'pending' &&
+                      request.resource.data.itemType is string &&
+                      request.resource.data.itemType.size() < 500;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Chat messages
+    match /chats/{chatId}/messages/{messageId} {
+      // Chat ID should ideally be a combination of UIDs or a unique ID both have access to
+      allow read: if isAuthenticated() && (
+        request.auth.uid in chatId.split('_') || isAdmin()
+      );
+      allow create: if isAuthenticated() && 
+                      request.resource.data.senderUid == request.auth.uid &&
+                      (request.auth.uid in chatId.split('_') || isAdmin()) &&
+                      request.resource.data.text is string &&
+                      request.resource.data.text.size() < 2000;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
